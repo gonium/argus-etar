@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"flag"
 	"fmt"
 	"github.com/ChimeraCoder/anaconda"
 	"github.com/gonium/argus_etar"
@@ -14,11 +15,15 @@ import (
 )
 
 var argus_flights argus.Flights
+
+var sbsEndpoint = flag.String("sbs", "127.0.0.1:30003",
+	"Where to retrieve SBS data from")
+
 var TWITTER_CONSUMER_KEY = os.Getenv("CONSUMER_KEY")
 var TWITTER_CONSUMER_SECRET = os.Getenv("CONSUMER_SECRET")
 var TWITTER_ACCESS_TOKEN = os.Getenv("ACCESS_TOKEN")
 var TWITTER_ACCESS_TOKEN_SECRET = os.Getenv("ACCESS_TOKEN_SECRET")
-var api *anaconda.TwitterApi
+var twitterAPI *anaconda.TwitterApi
 
 func receive_SBS(netaddress string, waitgroup sync.WaitGroup) {
 	defer waitgroup.Done()
@@ -104,7 +109,7 @@ func evaluateFlights(waitgroup sync.WaitGroup, quit chan struct{}) {
 							"Incoming: Flight %s, http://flightaware.com/live/flight/%s",
 							value.Callsign, value.Callsign)
 					}
-					tweetID, err := api.PostTweet("I'm alive!", nil)
+					tweetID, err := twitterAPI.PostTweet("I'm alive!", nil)
 					if err != nil {
 						fmt.Fprintf(os.Stderr, "Failed to post tweet: %s\n", err.Error())
 					} else {
@@ -121,6 +126,11 @@ func evaluateFlights(waitgroup sync.WaitGroup, quit chan struct{}) {
 }
 
 func init() {
+	flag.Parse()
+	if len(strings.TrimSpace(*sbsEndpoint)) == 0 {
+		fmt.Fprintf(os.Stderr, "Please specify the SBS endpoint\n")
+		os.Exit(2)
+	}
 	// Initialize our flight surveillance recorder data structure
 	argus_flights = make(map[string]argus.Flight)
 	if TWITTER_CONSUMER_KEY == "" || TWITTER_CONSUMER_SECRET == "" ||
@@ -131,7 +141,7 @@ func init() {
 	}
 	anaconda.SetConsumerKey(TWITTER_CONSUMER_KEY)
 	anaconda.SetConsumerSecret(TWITTER_CONSUMER_SECRET)
-	api = anaconda.NewTwitterApi(TWITTER_ACCESS_TOKEN, TWITTER_ACCESS_TOKEN_SECRET)
+	twitterAPI = anaconda.NewTwitterApi(TWITTER_ACCESS_TOKEN, TWITTER_ACCESS_TOKEN_SECRET)
 }
 
 func main() {
@@ -140,7 +150,7 @@ func main() {
 	wg.Add(2)
 	quit := make(chan struct{})
 	// TODO: Take this from the command line
-	go receive_SBS("127.0.0.1:30003", wg)
+	go receive_SBS(*sbsEndpoint, wg)
 	go evaluateFlights(wg, quit)
 
 	//}
