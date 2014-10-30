@@ -28,7 +28,7 @@ func receive_SBS(netaddress string, waitgroup sync.WaitGroup) {
 		os.Exit(1)
 	}
 	connbuf := bufio.NewReader(conn)
-	cnt := 0
+	fmt.Println("Collecting incoming flight facts.")
 	for {
 		str, err := connbuf.ReadString('\n')
 		if err != nil {
@@ -46,11 +46,6 @@ func receive_SBS(netaddress string, waitgroup sync.WaitGroup) {
 			// http://www.homepages.mcb.net/bones/SBS/Article/Barebones42_Socket_Data.htm
 			// For now, only parse MSG messages.
 			if sbs[0] == "MSG" {
-				cnt += 1
-				if cnt == 300 {
-					fmt.Println(argus_flights)
-					cnt = 0
-				}
 				recvTime := time.Now()
 				hexIdent := sbs[4]
 				switch sbs[1] { // This contains the subtype
@@ -92,12 +87,46 @@ func receive_SBS(netaddress string, waitgroup sync.WaitGroup) {
 	}
 }
 
+func evaluateFlights(waitgroup sync.WaitGroup, quit chan struct{}) {
+	defer waitgroup.Done()
+	ticker := time.NewTicker(60 * time.Second)
+	for {
+		select {
+		case <-ticker.C:
+			// to stuff
+			fmt.Println("Current flights")
+			fmt.Println(argus_flights)
+			for _, value := range argus_flights {
+				if value.IsETAR() {
+					tweet := "Incoming: Flight with unknown callsign."
+					if len(strings.TrimSpace(value.Callsign)) != 0 {
+						tweet = fmt.Sprintf(
+							"Incoming: Flight %s, http://flightaware.com/live/flight/%s",
+							value.Callsign, value.Callsign)
+					}
+					tweetID, err := api.PostTweet("I'm alive!", nil)
+					if err != nil {
+						fmt.Fprintf(os.Stderr, "Failed to post tweet: %s\n", err.Error())
+					} else {
+						fmt.Println(tweetID, ":", tweet)
+					}
+				}
+			}
+			argus_flights.Tick()
+		case <-quit:
+			ticker.Stop()
+			return
+		}
+	}
+}
+
 func init() {
 	// Initialize our flight surveillance recorder data structure
 	argus_flights = make(map[string]argus.Flight)
 	if TWITTER_CONSUMER_KEY == "" || TWITTER_CONSUMER_SECRET == "" ||
 		TWITTER_ACCESS_TOKEN == "" || TWITTER_ACCESS_TOKEN_SECRET == "" {
 		fmt.Fprintf(os.Stderr, "Credentials are invalid: at least one is empty\n")
+		fmt.Fprintf(os.Stderr, "use export TWITTER_ACCESS_TOKEN=<Your token> etc.\n")
 		os.Exit(1)
 	}
 	anaconda.SetConsumerKey(TWITTER_CONSUMER_KEY)
@@ -106,16 +135,14 @@ func init() {
 }
 
 func main() {
-	// TODO: Take this from the command line
+	// TODO: Terminate goroutines properly (CTRL-C, Errors)
 	wg := sync.WaitGroup{}
-	wg.Add(1)
+	wg.Add(2)
+	quit := make(chan struct{})
+	// TODO: Take this from the command line
 	go receive_SBS("127.0.0.1:30003", wg)
+	go evaluateFlights(wg, quit)
 
-	//tweet, err := api.PostTweet("I'm alive!", nil)
-	//if err != nil {
-	//	fmt.Fprintf(os.Stderr, "Failed to post tweet: %s\n", err.Error())
-	//} else {
-	//	fmt.Println(tweet)
 	//}
 
 	wg.Wait()
